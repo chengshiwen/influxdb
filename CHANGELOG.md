@@ -1,6 +1,8 @@
 v1.8.11 [unreleased]
 -------------------
 
+-	[#18429](https://github.com/influxdata/influxdb/pull/18429): Add option to authenticate prometheus remote read
+
 v1.8.10 [2021-10-11]
 -------------------
 
