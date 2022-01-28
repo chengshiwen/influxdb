@@ -31,6 +31,9 @@ func TestServer_BackupAndRestore(t *testing.T) {
 	portableBackupDir, _ := ioutil.TempDir("", "backup")
 	defer os.RemoveAll(portableBackupDir)
 
+	shardBackupDir, _ := ioutil.TempDir("", "backup")
+	defer os.RemoveAll(shardBackupDir)
+
 	db := "mydb"
 	rp := "forever"
 
@@ -123,23 +126,26 @@ func TestServer_BackupAndRestore(t *testing.T) {
 		}
 
 		// now backup
-		cmd := backup.NewCommand()
 		_, port, err := net.SplitHostPort(config.BindAddress)
 		if err != nil {
 			t.Fatal(err)
 		}
 		hostAddress := net.JoinHostPort("localhost", port)
-		if err := cmd.Run("-host", hostAddress, "-database", "mydb", fullBackupDir); err != nil {
+		if err := backup.NewCommand().Run("-host", hostAddress, "-database", "mydb", fullBackupDir); err != nil {
 			t.Fatalf("error backing up: %s, hostAddress: %s", err.Error(), hostAddress)
 		}
 
 		time.Sleep(time.Second)
-		if err := cmd.Run("-host", hostAddress, "-database", "mydb", "-start", "1970-01-01T00:00:00.001Z", "-end", "1970-01-01T00:00:00.009Z", partialBackupDir); err != nil {
+		if err := backup.NewCommand().Run("-host", hostAddress, "-database", "mydb", "-start", "1970-01-01T00:00:00.001Z", "-end", "1970-01-01T00:00:00.009Z", partialBackupDir); err != nil {
 			t.Fatalf("error backing up: %s, hostAddress: %s", err.Error(), hostAddress)
 		}
 
 		// also testing short-form flag here
-		if err := cmd.Run("-portable", "-host", hostAddress, "-db", "mydb", "-start", "1970-01-01T00:00:00.001Z", "-end", "1970-01-01T00:00:00.009Z", portableBackupDir); err != nil {
+		if err := backup.NewCommand().Run("-portable", "-host", hostAddress, "-db", "mydb", "-start", "1970-01-01T00:00:00.001Z", "-end", "1970-01-01T00:00:00.009Z", portableBackupDir); err != nil {
+			t.Fatalf("error backing up: %s, hostAddress: %s", err.Error(), hostAddress)
+		}
+
+		if err := backup.NewCommand().Run("-portable", "-host", hostAddress, "-shard", "1", shardBackupDir); err != nil {
 			t.Fatalf("error backing up: %s, hostAddress: %s", err.Error(), hostAddress)
 		}
 
@@ -162,9 +168,7 @@ func TestServer_BackupAndRestore(t *testing.T) {
 	}
 
 	// restore
-	cmd := restore.NewCommand()
-
-	if err := cmd.Run("-metadir", config.Meta.Dir, "-datadir", config.Data.Dir, "-database", "mydb", fullBackupDir); err != nil {
+	if err := restore.NewCommand().Run("-metadir", config.Meta.Dir, "-datadir", config.Data.Dir, "-database", "mydb", fullBackupDir); err != nil {
 		t.Fatalf("error restoring: %s", err.Error())
 	}
 
@@ -203,7 +207,7 @@ func TestServer_BackupAndRestore(t *testing.T) {
 	}
 	defer proxy.Close()
 	go proxy.Serve()
-	cmd.Run("-host", proxy.Addr().String(), "-online", "-newdb", "mydbbak", "-db", "mydb", partialBackupDir)
+	restore.NewCommand().Run("-host", proxy.Addr().String(), "-online", "-newdb", "mydbbak", "-db", "mydb", partialBackupDir)
 
 	// wait for the import to finish, and unlock the shard engine.
 	time.Sleep(time.Second)
@@ -218,7 +222,7 @@ func TestServer_BackupAndRestore(t *testing.T) {
 	}
 
 	// 3. portable should be the same as the non-portable live restore
-	cmd.Run("-host", hostAddress, "-portable", "-newdb", "mydbbak2", "-db", "mydb", portableBackupDir)
+	restore.NewCommand().Run("-host", hostAddress, "-portable", "-newdb", "mydbbak2", "-db", "mydb", portableBackupDir)
 
 	// wait for the import to finish, and unlock the shard engine.
 	time.Sleep(time.Second)
@@ -232,21 +236,34 @@ func TestServer_BackupAndRestore(t *testing.T) {
 		t.Fatalf("query results wrong:\n\texp: %s\n\tgot: %s", partialExpected, res)
 	}
 
-	// 4.  backup all DB's, then drop them, then restore them and all 3 above tests should pass again.
-	// now backup
-	bCmd := backup.NewCommand()
+	// 4. The shard backup should be same as the portable live restore
+	restore.NewCommand().Run("-host", hostAddress, "-portable", "-newdb", "mydbbak3", "-db", "mydb", shardBackupDir)
 
-	if err := bCmd.Run("-portable", "-host", hostAddress, portableBackupDir); err != nil {
+	// wait for the import to finish, and unlock the shard engine.
+	time.Sleep(time.Second)
+
+	res, err = s.Query(`select * from "mydbbak3"."forever"."myseries"`)
+	if err != nil {
+		t.Fatalf("error querying: %s", err.Error())
+	}
+
+	if res != expected {
+		t.Fatalf("query results wrong:\n\texp: %s\n\tgot: %s", expected, res)
+	}
+
+	// 5.  backup all DB's, then drop them, then restore them and all 3 above tests should pass again.
+	// now backup
+	if err := backup.NewCommand().Run("-portable", "-host", hostAddress, portableBackupDir); err != nil {
 		t.Fatalf("error backing up: %s, hostAddress: %s", err.Error(), hostAddress)
 	}
 
-	_, err = s.Query(`drop database mydb; drop database mydbbak; drop database mydbbak2;`)
+	_, err = s.Query(`drop database mydb; drop database mydbbak; drop database mydbbak2; drop database mydbbak3`)
 	if err != nil {
 		t.Fatalf("Error dropping databases %s", err.Error())
 	}
 
 	// 3. portable should be the same as the non-portable live restore
-	cmd.Run("-host", hostAddress, "-portable", portableBackupDir)
+	restore.NewCommand().Run("-host", hostAddress, "-portable", portableBackupDir)
 
 	// wait for the import to finish, and unlock the shard engine.
 	time.Sleep(3 * time.Second)
@@ -273,6 +290,15 @@ func TestServer_BackupAndRestore(t *testing.T) {
 
 	if res != partialExpected {
 		t.Fatalf("query results wrong:\n\texp: %s\n\tgot: %s", partialExpected, res)
+	}
+
+	res, err = s.Query(`select * from "mydbbak3"."forever"."myseries"`)
+	if err != nil {
+		t.Fatalf("error querying: %s", err.Error())
+	}
+
+	if res != expected {
+		t.Fatalf("query results wrong:\n\texp: %s\n\tgot: %s", expected, res)
 	}
 
 	res, err = s.Query(`select * from "mydb"."forever"."myseries"`)
