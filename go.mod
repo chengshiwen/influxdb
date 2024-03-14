@@ -16,7 +16,7 @@ require (
 	github.com/golang/snappy v0.0.4
 	github.com/google/go-cmp v0.5.9
 	github.com/influxdata/flux v0.65.1
-	github.com/influxdata/influxql v1.1.1-0.20200828144457-65d3ef77d385
+	github.com/influxdata/influxql v1.2.0
 	github.com/influxdata/pkg-config v0.2.11
 	github.com/influxdata/roaring v0.4.13-0.20180809181101-fc520f41fab6
 	github.com/influxdata/usage-client v0.0.0-20160829180054-6d3895376368
