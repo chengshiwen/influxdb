@@ -1,4 +1,4 @@
-FROM golang:1.21.12 as builder
+FROM golang:1.21.13 as builder
 RUN go get -u github.com/golang/dep/...
 WORKDIR /go/src/github.com/influxdata/influxdb
 COPY Gopkg.toml Gopkg.lock ./
